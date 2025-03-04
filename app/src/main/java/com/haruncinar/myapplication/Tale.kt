@@ -37,7 +37,7 @@ fun Tale(
 
     val generativeModel = remember {
         GenerativeModel(
-            modelName = "gemini-pro",
+            modelName = "gemini-1.5-flash",
             apiKey = ""
         )
     }
@@ -45,6 +45,7 @@ fun Tale(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(color = Color.LightGray)
 
     ) {
         Column(

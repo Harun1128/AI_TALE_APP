@@ -12,6 +12,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.text.SimpleDateFormat
@@ -71,7 +76,7 @@ class StoryManager(private val context: Context) {
         val stories = getStories().toMutableList().apply { add(story) }
         saveStoriesToPrefs(stories)
 
-//       deleteStory(story)
+
     }
 
     fun getStories(): List<SavedStory> {
@@ -105,6 +110,11 @@ fun SavedStoriesScreen(
         stories = storyManager.getStories().reversed()
     }
 
+    fun deleteStory(story: SavedStory) {
+        storyManager.deleteStory(story)
+        stories = storyManager.getStories().reversed() // Listeyi güncelle
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -113,10 +123,11 @@ fun SavedStoriesScreen(
         if (stories.isEmpty()) {
             EmptyStoriesMessage()
         } else {
-            StoriesList(stories, onStoryClick)
+            StoriesList(stories, onStoryClick, onDeleteClick = { deleteStory(it) })
         }
     }
 }
+
 
 @Composable
 private fun EmptyStoriesMessage() {
@@ -138,7 +149,8 @@ private fun EmptyStoriesMessage() {
 @Composable
 private fun StoriesList(
     stories: List<SavedStory>,
-    onStoryClick: (SavedStory) -> Unit
+    onStoryClick: (SavedStory) -> Unit,
+    onDeleteClick: (SavedStory) -> Unit // Yeni parametre
 ) {
     LazyColumn(
         modifier = Modifier
@@ -147,15 +159,17 @@ private fun StoriesList(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         items(stories) { story ->
-            StoryCard(story, onStoryClick)
+            StoryCard(story, onStoryClick, onDeleteClick)
         }
     }
 }
 
+
 @Composable
 private fun StoryCard(
     story: SavedStory,
-    onStoryClick: (SavedStory) -> Unit
+    onStoryClick: (SavedStory) -> Unit,
+    onDeleteClick: (SavedStory) -> Unit // Yeni parametre
 ) {
     ElevatedCard(
         modifier = Modifier
@@ -166,13 +180,28 @@ private fun StoryCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(15.dp)
         ) {
-            Text(
-                text = story.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ){
+                    Text(
+                        text = story.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    IconButton(onClick = { onDeleteClick(story) }) { // Silme butonu
+                        Icon(Icons.Default.Delete, contentDescription = "Sil")
+                    }
+                }
+
+            }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = story.content.take(Constants.MAX_PREVIEW_LENGTH) +
@@ -193,12 +222,13 @@ private fun StoryCard(
 
 
 @Composable
-private fun TopBar(
+private fun TopBarWithTTS(
     onBack: () -> Unit,
-    onShare: (Context) -> Unit  // Context parametresi ekleyin
+    onShare: () -> Unit,
+    onPlayPause: () -> Unit,
+    onSettingsClick: () -> Unit,
+    isSpeaking: Boolean
 ) {
-    val context = LocalContext.current  // Context'i alın
-
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -207,8 +237,26 @@ private fun TopBar(
         IconButton(onClick = onBack) {
             Icon(Icons.Default.ArrowBack, contentDescription = "Geri")
         }
-        IconButton(onClick = { onShare(context) }) {  // Context'i geçin
-            Icon(Icons.Default.Share, contentDescription = "Paylaş")
+
+        // TTS kontrolleri
+        Row {
+            // Oynat/Durdur butonu
+            IconButton(onClick = onPlayPause) {
+                Icon(
+                    imageVector = if (isSpeaking) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isSpeaking) "Durdur" else "Sesli Oku"
+                )
+            }
+
+            // Ayarlar butonu
+            IconButton(onClick = onSettingsClick) {
+                Icon(Icons.Default.Settings, contentDescription = "Sesli Okuma Ayarları")
+            }
+
+            // Paylaş butonu
+            IconButton(onClick = onShare) {
+                Icon(Icons.Default.Share, contentDescription = "Paylaş")
+            }
         }
     }
 }
@@ -239,6 +287,24 @@ fun StoryDetailScreen(
     storyManager: StoryManager,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val ttsManager = remember { TTSManager.getInstance(context) }
+
+    // TTS durumunu takip et
+    val isSpeaking by ttsManager.isSpeaking.collectAsStateWithLifecycle()
+
+    // TTS ayarları için dialog kontrolü
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var speechRate by remember { mutableFloatStateOf(ttsManager.speechRate) }
+    var pitch by remember { mutableFloatStateOf(ttsManager.pitch) }
+
+    // Ekrandan çıkıldığında TTS'i durdur
+    DisposableEffect(Unit) {
+        onDispose {
+            ttsManager.stop()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -250,13 +316,69 @@ fun StoryDetailScreen(
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            TopBar(
+            TopBarWithTTS(
                 onBack = onBack,
-                onShare = { context -> shareStory(context, story) }  // Context'i geçin
+                onShare = { shareStory(context, story) },
+                onPlayPause = {
+                    if (isSpeaking) {
+                        ttsManager.stop()
+                    } else {
+                        ttsManager.speakStory(story.content)  //??Değistirecem
+                    }
+                },
+                onSettingsClick = { showSettingsDialog = true },
+                isSpeaking = isSpeaking
             )
             Spacer(modifier = Modifier.height(16.dp))
             StoryContent(story)
         }
+    }
+
+    // TTS Ayarları Dialog'u 
+    if (showSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            title = { Text("Sesli Okuma Ayarları") },
+            text = {
+                Column {
+                    Text("Konuşma Hızı: ${speechRate.toFloat()}")
+                    Slider(
+                        value = speechRate,
+                        onValueChange = { speechRate = it },
+                        valueRange = 0.1f..2.0f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text("Ses Perdesi: ${pitch.toFloat()}")
+                    Slider(
+                        value = pitch,
+                        onValueChange = { pitch = it },
+                        valueRange = 0.5f..2.0f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        ttsManager.speechRate = speechRate
+                        ttsManager.pitch = pitch
+                        showSettingsDialog = false
+                    }
+                ) {
+                    Text("Tamam")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showSettingsDialog = false }
+                ) {
+                    Text("İptal")
+                }
+            }
+        )
     }
 }
 
